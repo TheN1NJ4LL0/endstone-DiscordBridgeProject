@@ -1,0 +1,11 @@
+.idea/endstone-DiscordBridgeProject.iml
+.idea/misc.xml
+.idea/modules.xml
+.idea/vcs.xml
+.idea/inspectionProfiles/profiles_settings.xml
+dist/endstone_discord_bridge-5.1.1-py3-none-any.whl
+src/endstone_discord_bridge/config.toml
+src/endstone_discord_bridge.egg-info/top_level.txt
+src/endstone_discord_bridge.egg-info/SOURCES.txt
+src/endstone_discord_bridge.egg-info/PKG-INFO
+src/endstone_discord_bridge.egg-info/dependency_links.txt

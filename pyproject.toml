@@ -1,0 +1,29 @@
+[project]
+name = "endstone-discord-bridge"
+version = "5.1.2"
+description = "Endstone ↔ Discord bridge"
+requires-python = ">=3.10"
+dependencies = [
+  "endstone",
+  "discord.py>=2.3.0",
+]
+
+# 👇 entry point name must be lowercase hyphenated to match distro name rules
+[project.entry-points.endstone]
+discord-bridge = "endstone_discord_bridge.plugin:DiscordBridgePlugin"
+
+[build-system]
+requires = ["hatchling>=1.21.0"]
+build-backend = "hatchling.build"
+
+# 👇 tell Hatch where your actual package lives (src layout)
+[tool.hatch.build.targets.wheel]
+packages = ["src/endstone_discord_bridge"]
+
+# Include non-Python files inside the package (like config.toml, README)
+[tool.hatch.build]
+include = [
+  "README.md",
+  "src/endstone_discord_bridge/config.toml",
+  "src/endstone_discord_bridge/**/*.py",
+]
