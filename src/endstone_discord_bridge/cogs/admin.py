@@ -318,454 +318,9 @@ class AdminCommands(MinecraftCogBase):
         embed.set_footer(text="These operations will execute when the player joins the server")
         await interaction.followup.send(embed=embed, ephemeral=True)
 
-    # -------- Grief Monitoring --------
-    @app_commands.command(name="grief_stats", description="View grief monitoring statistics")
-    @admin_only()
-    @app_commands.describe(
-        time_range="Time range to analyze"
-    )
-    async def grief_stats(
-        self,
-        interaction: discord.Interaction,
-        time_range: str = "7d"
-    ):
-        await self.safe_defer(interaction, ephemeral=True)
-
-        try:
-            if not hasattr(self.plugin, 'grief_tracker'):
-                await interaction.followup.send(
-                    "❌ Grief monitoring is not enabled or not available.",
-                    ephemeral=True
-                )
-                return
-
-            # Parse time range
-            hours, days = self._parse_time_range(time_range)
-            stats = self.plugin.grief_tracker.get_stats(hours=hours, days=days)
-
-            embed = discord.Embed(
-                title=f"🛡️ Grief Monitoring Stats ({stats['time_range']})",
-                color=0xe74c3c,
-                timestamp=discord.utils.utcnow()
-            )
-
-            # Overview stats
-            embed.add_field(
-                name="📊 Overview",
-                value=f"**Total Events:** {stats['total_events']:,}\n"
-                      f"**Block Breaks:** {stats['block_breaks']:,}\n"
-                      f"**Block Places:** {stats['block_places']:,}\n"
-                      f"**Container Access:** {stats['container_accesses']:,}\n"
-                      f"**Unique Players:** {stats['unique_players']}",
-                inline=True
-            )
-
-            # Most broken blocks
-            if stats['most_broken_blocks']:
-                broken_list = []
-                for item in stats['most_broken_blocks'][:5]:
-                    broken_list.append(f"**{item['block_type']}:** {item['count']}")
-
-                embed.add_field(
-                    name="🔨 Most Broken Blocks",
-                    value="\n".join(broken_list),
-                    inline=True
-                )
-
-            # Most placed blocks
-            if stats['most_placed_blocks']:
-                placed_list = []
-                for item in stats['most_placed_blocks'][:5]:
-                    placed_list.append(f"**{item['block_type']}:** {item['count']}")
-
-                embed.add_field(
-                    name="🧱 Most Placed Blocks",
-                    value="\n".join(placed_list),
-                    inline=True
-                )
-
-            # Most accessed containers
-            if stats['most_accessed_containers']:
-                container_list = []
-                for item in stats['most_accessed_containers'][:5]:
-                    container_list.append(f"**{item['block_type']}:** {item['count']}")
-
-                embed.add_field(
-                    name="📦 Most Accessed Containers",
-                    value="\n".join(container_list),
-                    inline=True
-                )
-
-            embed.set_footer(text="Use /grief_player to view specific player activity")
-            await interaction.followup.send(embed=embed, ephemeral=True)
-
-        except Exception as e:
-            self.plugin.logger.error(f"Error generating grief stats: {e}")
-            await interaction.followup.send(
-                "❌ Failed to generate grief statistics. Check server logs for details.",
-                ephemeral=True
-            )
-
-    @grief_stats.autocomplete('time_range')
-    async def grief_stats_time_autocomplete(
-        self,
-        interaction: discord.Interaction,
-        current: str,
-    ) -> list[app_commands.Choice[str]]:
-        return [
-            # Hours (1-12)
-            app_commands.Choice(name="1 hour", value="1h"),
-            app_commands.Choice(name="2 hours", value="2h"),
-            app_commands.Choice(name="3 hours", value="3h"),
-            app_commands.Choice(name="4 hours", value="4h"),
-            app_commands.Choice(name="5 hours", value="5h"),
-            app_commands.Choice(name="6 hours", value="6h"),
-            app_commands.Choice(name="7 hours", value="7h"),
-            app_commands.Choice(name="8 hours", value="8h"),
-            app_commands.Choice(name="9 hours", value="9h"),
-            app_commands.Choice(name="10 hours", value="10h"),
-            app_commands.Choice(name="11 hours", value="11h"),
-            app_commands.Choice(name="12 hours", value="12h"),
-            # Days (1-6)
-            app_commands.Choice(name="1 day", value="1d"),
-            app_commands.Choice(name="2 days", value="2d"),
-            app_commands.Choice(name="3 days", value="3d"),
-            app_commands.Choice(name="4 days", value="4d"),
-            app_commands.Choice(name="5 days", value="5d"),
-            app_commands.Choice(name="6 days", value="6d"),
-            # Weeks
-            app_commands.Choice(name="7 days (1 week)", value="7d"),
-            app_commands.Choice(name="14 days (2 weeks)", value="14d"),
-            app_commands.Choice(name="30 days (1 month)", value="30d"),
-        ]
-
-    @app_commands.command(name="grief_player", description="View grief activity for a specific player")
-    @admin_only()
-    @app_commands.describe(
-        player="Player name to investigate",
-        time_range="Time range to analyze",
-        event_type="Type of events to show (optional)"
-    )
-    async def grief_player(
-        self,
-        interaction: discord.Interaction,
-        player: str,
-        time_range: str = "7d",
-        event_type: Optional[str] = None
-    ):
-        await self.safe_defer(interaction, ephemeral=True)
-
-        try:
-            if not hasattr(self.plugin, 'grief_tracker'):
-                await interaction.followup.send(
-                    "❌ Grief monitoring is not enabled or not available.",
-                    ephemeral=True
-                )
-                return
-
-            # Find player UUID
-            def find_player_uuid():
-                # Try to find online player first
-                online_player = self.plugin._online_player_obj(player)
-                if online_player:
-                    return str(online_player.unique_id)
-
-                # Try to find in linked accounts
-                link = self.plugin.linked.get_by_minecraft_name(player)
-                if link:
-                    return link.minecraft_uuid
-
-                # Try to find in activity tracker
-                for entry in self.plugin.activity_tracker.minecraft_activity:
-                    if entry.player_name.lower() == player.lower():
-                        return entry.player_uuid
-
-                return None
-
-            player_uuid = await self._run_on_server_thread(find_player_uuid)
-
-            if not player_uuid:
-                await interaction.followup.send(
-                    f"❌ Could not find UUID for player '{player}'. Make sure the name is correct.",
-                    ephemeral=True
-                )
-                return
-
-            # Parse time range and get events for player
-            hours, days = self._parse_time_range(time_range)
-            event_filter = event_type if event_type else None
-            events = self.plugin.grief_tracker.get_events_by_player(player_uuid, event_filter, hours=hours, days=days)
-
-            # Format time range for display
-            if hours:
-                time_display = f"{hours} hour{'s' if hours != 1 else ''}"
-            else:
-                time_display = f"{days} day{'s' if days != 1 else ''}"
-
-            if not events:
-                await interaction.followup.send(
-                    f"❌ No grief events found for **{player}** in the last {time_display}.",
-                    ephemeral=True
-                )
-                return
-
-            # Create embed
-            embed = discord.Embed(
-                title=f"🔍 Grief Activity: {player}",
-                description=f"Found {len(events)} events in the last {time_display}",
-                color=0xe74c3c,
-                timestamp=discord.utils.utcnow()
-            )
-
-            # Count events by type
-            break_count = sum(1 for e in events if e.event_type == "block_break")
-            place_count = sum(1 for e in events if e.event_type == "block_place")
-            container_count = sum(1 for e in events if e.event_type == "container_access")
-
-            embed.add_field(
-                name="📊 Event Summary",
-                value=f"🔨 **Block Breaks:** {break_count}\n"
-                      f"🧱 **Block Places:** {place_count}\n"
-                      f"📦 **Container Access:** {container_count}",
-                inline=True
-            )
-
-            # Show recent events (last 10)
-            recent_events = sorted(events, key=lambda x: x.timestamp, reverse=True)[:10]
-            event_lines = []
-
-            for event in recent_events:
-                timestamp = discord.utils.format_dt(
-                    discord.utils.utcfromtimestamp(event.timestamp),
-                    style='R'
-                )
-
-                if event.event_type == "block_break":
-                    icon = "🔨"
-                elif event.event_type == "block_place":
-                    icon = "🧱"
-                else:
-                    icon = "📦"
-
-                location = f"({event.location['x']}, {event.location['y']}, {event.location['z']})"
-                event_lines.append(f"{icon} **{event.block_type}** at {location} {timestamp}")
-
-            embed.add_field(
-                name="🕐 Recent Events",
-                value="\n".join(event_lines),
-                inline=False
-            )
-
-            embed.set_footer(text=f"Player UUID: {player_uuid}")
-            await interaction.followup.send(embed=embed, ephemeral=True)
-
-        except Exception as e:
-            self.plugin.logger.error(f"Error generating grief player report: {e}")
-            await interaction.followup.send(
-                "❌ Failed to generate grief player report. Check server logs for details.",
-                ephemeral=True
-            )
-
-    @grief_player.autocomplete('time_range')
-    async def grief_player_time_autocomplete(
-        self,
-        interaction: discord.Interaction,
-        current: str,
-    ) -> list[app_commands.Choice[str]]:
-        return [
-            # Hours (1-12)
-            app_commands.Choice(name="1 hour", value="1h"),
-            app_commands.Choice(name="2 hours", value="2h"),
-            app_commands.Choice(name="3 hours", value="3h"),
-            app_commands.Choice(name="4 hours", value="4h"),
-            app_commands.Choice(name="5 hours", value="5h"),
-            app_commands.Choice(name="6 hours", value="6h"),
-            app_commands.Choice(name="7 hours", value="7h"),
-            app_commands.Choice(name="8 hours", value="8h"),
-            app_commands.Choice(name="9 hours", value="9h"),
-            app_commands.Choice(name="10 hours", value="10h"),
-            app_commands.Choice(name="11 hours", value="11h"),
-            app_commands.Choice(name="12 hours", value="12h"),
-            # Days (1-6)
-            app_commands.Choice(name="1 day", value="1d"),
-            app_commands.Choice(name="2 days", value="2d"),
-            app_commands.Choice(name="3 days", value="3d"),
-            app_commands.Choice(name="4 days", value="4d"),
-            app_commands.Choice(name="5 days", value="5d"),
-            app_commands.Choice(name="6 days", value="6d"),
-            # Weeks
-            app_commands.Choice(name="7 days (1 week)", value="7d"),
-            app_commands.Choice(name="14 days (2 weeks)", value="14d"),
-            app_commands.Choice(name="30 days (1 month)", value="30d"),
-        ]
-
-    @grief_player.autocomplete('event_type')
-    async def grief_player_event_type_autocomplete(
-        self,
-        interaction: discord.Interaction,
-        current: str,
-    ) -> list[app_commands.Choice[str]]:
-        return [
-            app_commands.Choice(name="All Events", value=""),
-            app_commands.Choice(name="Block Breaks", value="block_break"),
-            app_commands.Choice(name="Block Places", value="block_place"),
-            app_commands.Choice(name="Container Access", value="container_access"),
-        ]
-
-    @app_commands.command(name="grief_location", description="View grief activity near a specific location")
-    @admin_only()
-    @app_commands.describe(
-        x="X coordinate",
-        y="Y coordinate",
-        z="Z coordinate",
-        radius="Search radius (default: 5)",
-        time_range="Time range to analyze"
-    )
-    async def grief_location(
-        self,
-        interaction: discord.Interaction,
-        x: int,
-        y: int,
-        z: int,
-        radius: int = 5,
-        time_range: str = "7d"
-    ):
-        await self.safe_defer(interaction, ephemeral=True)
-
-        try:
-            if not hasattr(self.plugin, 'grief_tracker'):
-                await interaction.followup.send(
-                    "❌ Grief monitoring is not enabled or not available.",
-                    ephemeral=True
-                )
-                return
-
-            # Parse time range and get events
-            hours, days = self._parse_time_range(time_range)
-            location = {"x": x, "y": y, "z": z}
-            events = self.plugin.grief_tracker.get_events_by_location(location, radius, hours=hours, days=days)
-
-            # Format time range for display
-            if hours:
-                time_display = f"{hours} hour{'s' if hours != 1 else ''}"
-            else:
-                time_display = f"{days} day{'s' if days != 1 else ''}"
-
-            if not events:
-                await interaction.followup.send(
-                    f"❌ No grief events found near ({x}, {y}, {z}) within {radius} blocks in the last {time_display}.",
-                    ephemeral=True
-                )
-                return
-
-            # Create embed
-            embed = discord.Embed(
-                title=f"🗺️ Grief Activity Near ({x}, {y}, {z})",
-                description=f"Found {len(events)} events within {radius} blocks in the last {time_display}",
-                color=0xe74c3c,
-                timestamp=discord.utils.utcnow()
-            )
-
-            # Count events by type and player
-            break_count = sum(1 for e in events if e.event_type == "block_break")
-            place_count = sum(1 for e in events if e.event_type == "block_place")
-            container_count = sum(1 for e in events if e.event_type == "container_access")
-
-            unique_players = set(e.player_name for e in events)
-
-            embed.add_field(
-                name="📊 Summary",
-                value=f"🔨 **Block Breaks:** {break_count}\n"
-                      f"🧱 **Block Places:** {place_count}\n"
-                      f"📦 **Container Access:** {container_count}\n"
-                      f"👥 **Unique Players:** {len(unique_players)}",
-                inline=True
-            )
-
-            # Show events (limit to 15 most recent)
-            recent_events = events[:15]
-            event_lines = []
-
-            for event in recent_events:
-                timestamp = discord.utils.format_dt(
-                    discord.utils.utcfromtimestamp(event.timestamp),
-                    style='R'
-                )
-
-                if event.event_type == "block_break":
-                    icon = "🔨"
-                elif event.event_type == "block_place":
-                    icon = "🧱"
-                else:
-                    icon = "📦"
-
-                event_location = f"({event.location['x']}, {event.location['y']}, {event.location['z']})"
-                distance = max(
-                    abs(event.location['x'] - x),
-                    abs(event.location['y'] - y),
-                    abs(event.location['z'] - z)
-                )
-
-                event_lines.append(
-                    f"{icon} **{event.player_name}** {event.block_type} at {event_location} "
-                    f"({distance}b away) {timestamp}"
-                )
-
-            embed.add_field(
-                name=f"🕐 Recent Events ({len(recent_events)}/{len(events)})",
-                value="\n".join(event_lines),
-                inline=False
-            )
-
-            if len(events) > 15:
-                embed.add_field(
-                    name="ℹ️ Note",
-                    value=f"Showing {len(recent_events)} most recent events out of {len(events)} total.",
-                    inline=False
-                )
-
-            embed.set_footer(text=f"Search radius: {radius} blocks")
-            await interaction.followup.send(embed=embed, ephemeral=True)
-
-        except Exception as e:
-            self.plugin.logger.error(f"Error generating grief location report: {e}")
-            await interaction.followup.send(
-                "❌ Failed to generate grief location report. Check server logs for details.",
-                ephemeral=True
-            )
-
-    @grief_location.autocomplete('time_range')
-    async def grief_location_time_autocomplete(
-        self,
-        interaction: discord.Interaction,
-        current: str,
-    ) -> list[app_commands.Choice[str]]:
-        return [
-            # Hours (1-12)
-            app_commands.Choice(name="1 hour", value="1h"),
-            app_commands.Choice(name="2 hours", value="2h"),
-            app_commands.Choice(name="3 hours", value="3h"),
-            app_commands.Choice(name="4 hours", value="4h"),
-            app_commands.Choice(name="5 hours", value="5h"),
-            app_commands.Choice(name="6 hours", value="6h"),
-            app_commands.Choice(name="7 hours", value="7h"),
-            app_commands.Choice(name="8 hours", value="8h"),
-            app_commands.Choice(name="9 hours", value="9h"),
-            app_commands.Choice(name="10 hours", value="10h"),
-            app_commands.Choice(name="11 hours", value="11h"),
-            app_commands.Choice(name="12 hours", value="12h"),
-            # Days (1-6)
-            app_commands.Choice(name="1 day", value="1d"),
-            app_commands.Choice(name="2 days", value="2d"),
-            app_commands.Choice(name="3 days", value="3d"),
-            app_commands.Choice(name="4 days", value="4d"),
-            app_commands.Choice(name="5 days", value="5d"),
-            app_commands.Choice(name="6 days", value="6d"),
-            # Weeks
-            app_commands.Choice(name="7 days (1 week)", value="7d"),
-            app_commands.Choice(name="14 days (2 weeks)", value="14d"),
-            app_commands.Choice(name="30 days (1 month)", value="30d"),
-        ]
+    # -------- Grief Monitoring Commands Removed --------
+    # Grief monitoring still posts to Discord channels but commands have been removed
+    # to reduce server lag from command processing
 
     # -------- grief monitoring toggle commands --------
     @app_commands.command(name="grief_toggle", description="Toggle grief monitoring features on/off")
@@ -790,60 +345,159 @@ class AdminCommands(MinecraftCogBase):
         enabled = state.value == "on"
         feature_name = feature.value
 
-        def update_config():
+        def toggle_feature():
             try:
                 if feature_name == "all":
-                    # Toggle main grief monitoring and all sub-features
                     self.plugin.config.features.grief_monitoring = enabled
-                    self.plugin.config.grief_monitoring.track_block_break = enabled
-                    self.plugin.config.grief_monitoring.track_block_place = enabled
-                    self.plugin.config.grief_monitoring.track_container_access = enabled
-                    return "all grief monitoring features"
+                    result = f"All grief monitoring {'enabled' if enabled else 'disabled'}"
                 elif feature_name == "block_break":
                     self.plugin.config.grief_monitoring.track_block_break = enabled
-                    return "block break monitoring"
+                    result = f"Block break tracking {'enabled' if enabled else 'disabled'}"
                 elif feature_name == "block_place":
                     self.plugin.config.grief_monitoring.track_block_place = enabled
-                    return "block place monitoring"
+                    result = f"Block place tracking {'enabled' if enabled else 'disabled'}"
                 elif feature_name == "container_access":
                     self.plugin.config.grief_monitoring.track_container_access = enabled
-                    return "container access monitoring"
-                return None
+                    result = f"Container access tracking {'enabled' if enabled else 'disabled'}"
+                else:
+                    return {"success": False, "error": "Unknown feature"}
+
+                # Get current status for display
+                current_status = {
+                    "grief_monitoring": self.plugin.config.features.grief_monitoring,
+                    "block_break": self.plugin.config.grief_monitoring.track_block_break,
+                    "block_place": self.plugin.config.grief_monitoring.track_block_place,
+                    "container_access": self.plugin.config.grief_monitoring.track_container_access,
+                }
+
+                return {"success": True, "message": result, "current": current_status}
             except Exception as e:
-                self.plugin.logger.error(f"Failed to update grief monitoring config: {e}")
-                return None
+                return {"success": False, "error": str(e)}
 
-        result = await self._run_on_server_thread(update_config)
+        result = await self._run_on_server_thread(toggle_feature)
 
-        if result:
-            # Save the config changes
-            def save_config():
-                try:
-                    self.plugin.config.save(self.plugin.config_path)
-                    return True
-                except Exception as e:
-                    self.plugin.logger.error(f"Failed to save config: {e}")
-                    return False
+        if result["success"]:
+            # Create embed showing what changed
+            embed = discord.Embed(
+                title="⚙️ Grief Monitoring Updated",
+                description=result["message"],
+                color=0x2ecc71 if enabled else 0xe74c3c,
+                timestamp=discord.utils.utcnow()
+            )
 
-            saved = await self._run_on_server_thread(save_config)
+            # Show current grief monitoring status
+            current = result["current"]
+            grief_status = "✅ Enabled" if current["grief_monitoring"] else "❌ Disabled"
+            embed.add_field(name="Grief Monitoring", value=grief_status, inline=True)
 
-            if saved:
-                status = "enabled" if enabled else "disabled"
-                embed = discord.Embed(
-                    title="🛡️ Grief Monitoring Updated",
-                    description=f"**{result.title()}** has been **{status}**",
-                    color=0x2ecc71 if enabled else 0xe74c3c
+            if current["grief_monitoring"]:
+                features = []
+                if current["block_break"]:
+                    features.append("✅ Block Break")
+                else:
+                    features.append("❌ Block Break")
+
+                if current["block_place"]:
+                    features.append("✅ Block Place")
+                else:
+                    features.append("❌ Block Place")
+
+                if current["container_access"]:
+                    features.append("✅ Container Access")
+                else:
+                    features.append("❌ Container Access")
+
+                embed.add_field(
+                    name="Active Features",
+                    value="\n".join(features),
+                    inline=True
                 )
-                embed.add_field(name="Status", value=status.title(), inline=True)
-                embed.add_field(name="Feature", value=result.title(), inline=True)
 
-                await self.bot.audit(f"**{interaction.user}** {status} {result}")
-                await interaction.followup.send(embed=embed)
-            else:
-                await interaction.followup.send("⚠️ Failed to save config changes.", ephemeral=True)
+            embed.set_footer(text="Changes are in memory only. Update config.toml to persist.")
+
+            await self.bot.audit(
+                f"**{interaction.user}** toggled grief monitoring: {result['message']}"
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
         else:
-            await interaction.followup.send("⚠️ Failed to update grief monitoring settings.", ephemeral=True)
+            await interaction.followup.send(
+                f"❌ Failed to toggle grief monitoring: {result['error']}",
+                ephemeral=True
+            )
 
+    @app_commands.command(name="grief_status", description="Show current grief monitoring status and settings")
+    @admin_only()
+    async def grief_status(self, interaction: discord.Interaction):
+        await self.safe_defer(interaction, ephemeral=True)
+
+        def get_status():
+            try:
+                if not hasattr(self.plugin, 'grief_tracker'):
+                    return {"success": False, "error": "Grief tracker not initialized"}
+
+                status = {
+                    "enabled": self.plugin.config.features.grief_monitoring,
+                    "track_block_break": self.plugin.config.grief_monitoring.track_block_break,
+                    "track_block_place": self.plugin.config.grief_monitoring.track_block_place,
+                    "track_container_access": self.plugin.config.grief_monitoring.track_container_access,
+                    "retention_days": self.plugin.config.grief_monitoring.retention_days,
+                    "event_count": len(self.plugin.grief_tracker.events),
+                    "monitored_blocks": self.plugin.config.grief_monitoring.monitored_blocks,
+                    "grief_place_blocks": self.plugin.config.grief_monitoring.grief_place_blocks,
+                    "monitored_containers": self.plugin.config.grief_monitoring.monitored_containers,
+                }
+                return {"success": True, "status": status}
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+
+        result = await self._run_on_server_thread(get_status)
+
+        if result["success"]:
+            status = result["status"]
+            embed = discord.Embed(
+                title="🛡️ Grief Monitoring Status",
+                color=0x2ecc71 if status["enabled"] else 0x95a5a6,
+                timestamp=discord.utils.utcnow()
+            )
+
+            # Main status
+            main_status = "✅ Enabled" if status["enabled"] else "❌ Disabled"
+            embed.add_field(name="Status", value=main_status, inline=True)
+            embed.add_field(name="Events Stored", value=f"{status['event_count']:,}", inline=True)
+            embed.add_field(name="Retention", value=f"{status['retention_days']} days", inline=True)
+
+            if status["enabled"]:
+                # Tracking features
+                features = []
+                if status["track_block_break"]:
+                    features.append("✅ Block Break")
+                if status["track_block_place"]:
+                    features.append("✅ Block Place (grief blocks only)")
+                if status["track_container_access"]:
+                    features.append("✅ Container Access")
+
+                if features:
+                    embed.add_field(name="Active Tracking", value="\n".join(features), inline=False)
+
+                # Monitored items summary
+                grief_blocks_count = len(status["grief_place_blocks"])
+                containers_count = len(status["monitored_containers"])
+
+                embed.add_field(name="Grief Blocks Monitored", value=f"{grief_blocks_count} types", inline=True)
+                embed.add_field(name="Containers Monitored", value=f"{containers_count} types", inline=True)
+            else:
+                embed.add_field(
+                    name="Note",
+                    value="Grief monitoring is disabled. Use `/grief_toggle` to enable features.",
+                    inline=False
+                )
+
+            embed.set_footer(text="Use /grief_toggle to change settings • Use /config_reload to reload from file")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        else:
+            await interaction.followup.send(f"❌ Failed to get grief status: {result['error']}", ephemeral=True)
+
+    # -------- config reload --------
     @app_commands.command(name="config_reload", description="Reload the plugin configuration from config.toml")
     @admin_only()
     async def config_reload(self, interaction: discord.Interaction):

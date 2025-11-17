@@ -219,21 +219,10 @@ track_member_events = true  # Track joins/leaves
 
 | Command | Description |
 |---------|-------------|
-| `/grief_stats [time_range]` | View grief monitoring statistics |
-| `/grief_player <player> [time_range] [event_type]` | View grief activity for a specific player |
-| `/grief_location <x> <y> <z> [radius] [time_range]` | View grief activity near coordinates |
 | `/grief_toggle <feature> <on/off>` | Toggle grief monitoring features |
 | `/grief_status` | View current grief monitoring status |
 
-**Time Range Options:**
-- Hours: `1h`, `2h`, `3h`, `4h`, `5h`, `6h`, `7h`, `8h`, `9h`, `10h`, `11h`, `12h`
-- Days: `1d`, `2d`, `3d`, `4d`, `5d`, `6d`
-- Weeks: `7d` (1 week), `14d` (2 weeks), `30d` (1 month)
-
-**Event Types:**
-- `block_break` - Block breaking events
-- `block_place` - Block placement events (grief blocks only)
-- `container_access` - Container access events
+**Note:** Grief search commands (`/grief_stats`, `/grief_player`, `/grief_location`) have been removed to reduce server lag. Grief events are still tracked and posted to Discord channels in real-time for monitoring.
 
 ### Admin Commands - Activity Tracking
 
@@ -290,12 +279,10 @@ grief_place_blocks = [
 ]
 ```
 
-4. **Use commands to investigate**:
-```
-/grief_stats 24h                    # View last 24 hours of activity
-/grief_player PlayerName 12h        # Check what PlayerName did in last 12 hours
-/grief_location 100 64 200 10 6h    # Check activity near coordinates (10 block radius, 6 hours)
-```
+4. **Monitor events in Discord channels**:
+   - All grief events are posted to the configured channels in real-time
+   - Use `/grief_status` to check current monitoring configuration
+   - Use `/grief_toggle` to enable/disable specific tracking features
 
 ### Account Linking Workflow
 
